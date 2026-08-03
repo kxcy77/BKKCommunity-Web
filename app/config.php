@@ -36,6 +36,7 @@ return [
     'app_url' => rtrim((string) env_value('APP_URL', 'http://localhost:8080'), '/'),
     'base_path' => rtrim((string) env_value('APP_BASE_PATH', ''), '/'),
     'session_name' => env_value('APP_SESSION_NAME', 'bkk_community_session'),
+    'trust_proxy' => filter_var(env_value('APP_TRUST_PROXY', 'false'), FILTER_VALIDATE_BOOL),
     'mail_from' => env_value('MAIL_FROM', ''),
     'db' => [
         'host' => env_value('DB_HOST', ''),

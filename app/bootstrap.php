@@ -6,11 +6,29 @@ $config = require __DIR__ . '/config.php';
 
 date_default_timezone_set('Africa/Johannesburg');
 
+$requestIsHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+if (!$requestIsHttps && !empty($config['trust_proxy'])) {
+    $forwardedProto = strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0]));
+    $requestIsHttps = $forwardedProto === 'https';
+}
+
+if (!headers_sent()) {
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: DENY');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+    header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
+    header("Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; font-src 'self'; connect-src 'self'");
+    if ($requestIsHttps) {
+        header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+    }
+}
+
 if (session_status() !== PHP_SESSION_ACTIVE) {
+    ini_set('session.use_strict_mode', '1');
     session_name((string) $config['session_name']);
     session_set_cookie_params([
         'httponly' => true,
-        'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
+        'secure' => $requestIsHttps,
         'samesite' => 'Lax',
         'path' => '/',
     ]);
@@ -59,6 +77,27 @@ function verify_csrf(): void
         http_response_code(419);
         exit('Your session expired. Please return to the previous page and try again.');
     }
+}
+
+function rate_limit_blocked(string $key, int $limit, int $windowSeconds): bool
+{
+    $cutoff = time() - $windowSeconds;
+    $attempts = array_values(array_filter(
+        $_SESSION['rate_limits'][$key] ?? [],
+        static fn (mixed $timestamp): bool => is_int($timestamp) && $timestamp >= $cutoff
+    ));
+    $_SESSION['rate_limits'][$key] = $attempts;
+    return count($attempts) >= $limit;
+}
+
+function rate_limit_hit(string $key): void
+{
+    $_SESSION['rate_limits'][$key][] = time();
+}
+
+function rate_limit_clear(string $key): void
+{
+    unset($_SESSION['rate_limits'][$key]);
 }
 
 function flash(string $type, string $message): void

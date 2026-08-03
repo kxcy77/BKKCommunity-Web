@@ -22,14 +22,21 @@ if ($action === 'logout') {
 if ($action === 'login') {
     $email = trim((string) ($_POST['email'] ?? ''));
     $password = (string) ($_POST['password'] ?? '');
+    if (rate_limit_blocked('login', 8, 900)) {
+        flash('error', 'Too many login attempts. Wait 15 minutes before trying again.');
+        redirect_to('login.php');
+    }
     if (!filter_var($email, FILTER_VALIDATE_EMAIL) || $password === '') {
+        rate_limit_hit('login');
         flash('error', 'Enter a valid email address and password.');
         redirect_to('login.php');
     }
     if (!attempt_login($email, $password)) {
+        rate_limit_hit('login');
         flash('error', 'The email address or password was incorrect.');
         redirect_to('login.php');
     }
+    rate_limit_clear('login');
     $destination = safe_return_path($_SESSION['return_after_login'] ?? null, is_admin() ? 'admin/index.php' : 'profile.php');
     unset($_SESSION['return_after_login']);
     flash('success', 'Welcome back, ' . (current_user()['full_name'] ?? 'member') . '.');
@@ -37,6 +44,11 @@ if ($action === 'login') {
 }
 
 if ($action === 'register') {
+    if (rate_limit_blocked('register', 5, 3600)) {
+        flash('error', 'Too many registration attempts. Wait before trying again.');
+        redirect_to('register.php');
+    }
+    rate_limit_hit('register');
     $input = [
         'full_name' => trim((string) ($_POST['full_name'] ?? '')),
         'email' => trim((string) ($_POST['email'] ?? '')),
@@ -71,6 +83,11 @@ if ($action === 'register') {
 
 if ($action === 'request_reset') {
     $email = strtolower(trim((string) ($_POST['email'] ?? '')));
+    if (rate_limit_blocked('password_reset', 5, 3600)) {
+        flash('info', 'If an account matches that address, reset instructions will be sent.');
+        redirect_to('login.php');
+    }
+    rate_limit_hit('password_reset');
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         flash('error', 'Enter a valid email address.');
         redirect_to('reset-password.php');
@@ -78,7 +95,7 @@ if ($action === 'request_reset') {
     $db = database();
     $mailFrom = trim((string) app_config('mail_from'));
     if ($db && $mailFrom !== '') {
-        $statement = $db->prepare('SELECT id FROM users WHERE email = ? LIMIT 1');
+        $statement = $db->prepare('SELECT id FROM users WHERE email = ? AND deleted_at IS NULL LIMIT 1');
         $statement->execute([$email]);
         $userId = $statement->fetchColumn();
         if ($userId) {
@@ -138,6 +155,10 @@ if ($action === 'complete_reset') {
 }
 
 if ($action === 'contact') {
+    if (rate_limit_blocked('contact', 5, 600)) {
+        flash('error', 'Too many messages were submitted. Wait 10 minutes before trying again.');
+        redirect_to('contact.php');
+    }
     $input = [
         'name' => trim((string) ($_POST['name'] ?? '')),
         'email' => trim((string) ($_POST['email'] ?? '')),
@@ -145,7 +166,8 @@ if ($action === 'contact') {
         'subject' => trim((string) ($_POST['subject'] ?? 'General enquiry')),
         'message' => trim((string) ($_POST['message'] ?? '')),
     ];
-    if (mb_strlen($input['name']) < 2 || !filter_var($input['email'], FILTER_VALIDATE_EMAIL) || mb_strlen($input['message']) < 10) {
+    $allowedSubjects = ['General enquiry', 'Event enquiry', 'Discount enquiry', 'Local service enquiry', 'Website support'];
+    if (mb_strlen($input['name']) < 2 || !filter_var($input['email'], FILTER_VALIDATE_EMAIL) || mb_strlen($input['phone']) > 30 || !in_array($input['subject'], $allowedSubjects, true) || mb_strlen($input['message']) < 10) {
         flash('error', 'Enter your name, a valid email address and a message of at least 10 characters.');
         redirect_to('contact.php');
     }
@@ -153,6 +175,7 @@ if ($action === 'contact') {
         flash('error', 'Please shorten your message to 2,000 characters or fewer.');
         redirect_to('contact.php');
     }
+    rate_limit_hit('contact');
     save_contact_message($input);
     flash('success', is_demo_mode() ? 'Your message was saved for this demo session only.' : 'Your message was received. The community team will reply as soon as possible.');
     redirect_to('contact.php');
@@ -207,8 +230,10 @@ if ($action === 'update_preferences') {
     $_SESSION['notification_preferences'] = $preferences;
     $user = current_user();
     if (($db = database()) && !empty($user['id'])) {
-        $db->prepare('UPDATE users SET event_reminders = ?, discount_alerts = ? WHERE id = ?')->execute([(int) $preferences['event_reminders'], (int) $preferences['discount_alerts'], $user['id']]);
+        $db->prepare('UPDATE users SET event_reminders_enabled = ?, discount_alerts_enabled = ? WHERE id = ?')->execute([(int) $preferences['event_reminders'], (int) $preferences['discount_alerts'], $user['id']]);
     }
+    $_SESSION['user']['event_reminders'] = $preferences['event_reminders'];
+    $_SESSION['user']['discount_alerts'] = $preferences['discount_alerts'];
     flash('success', is_demo_mode() ? 'Preferences saved for this demo session.' : 'Notification preferences saved.');
     redirect_to('profile.php');
 }
@@ -243,7 +268,11 @@ if ($action === 'admin_create_event') {
         'tone' => trim((string) ($_POST['tone'] ?? 'blue')),
         'description' => trim((string) ($_POST['description'] ?? '')),
     ];
-    if (mb_strlen($event['title']) < 3 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $event['date']) || !preg_match('/^\d{2}:\d{2}$/', $event['time']) || !preg_match('/^\d{2}:\d{2}$/', $event['end_time']) || mb_strlen($event['location']) < 3 || mb_strlen($event['description']) < 10) {
+    $startAt = DateTimeImmutable::createFromFormat('!Y-m-d H:i', $event['date'] . ' ' . $event['time']);
+    $endAt = DateTimeImmutable::createFromFormat('!Y-m-d H:i', $event['date'] . ' ' . $event['end_time']);
+    $exactStart = $startAt && $startAt->format('Y-m-d H:i') === $event['date'] . ' ' . $event['time'];
+    $exactEnd = $endAt && $endAt->format('Y-m-d H:i') === $event['date'] . ' ' . $event['end_time'];
+    if (mb_strlen($event['title']) < 3 || !$exactStart || !$exactEnd || $endAt <= $startAt || $startAt <= new DateTimeImmutable('now') || mb_strlen($event['location']) < 3 || mb_strlen($event['description']) < 10) {
         flash('error', 'Complete every event field with valid information.');
         redirect_to('admin/events.php');
     }
@@ -293,6 +322,50 @@ if ($action === 'admin_delete_discount') {
     admin_delete_discount((int) $discountId);
     flash('success', 'The discount was deleted.');
     redirect_to('admin/discounts.php');
+}
+
+if ($action === 'admin_update_message') {
+    require_admin();
+    $messageId = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT);
+    $status = trim((string) ($_POST['status'] ?? ''));
+    if (!$messageId || !admin_update_contact_status((int) $messageId, $status)) {
+        flash('error', 'The message status could not be updated.');
+    } else {
+        flash('success', 'The message status was updated.');
+    }
+    redirect_to('admin/messages.php');
+}
+
+if ($action === 'admin_create_service') {
+    require_admin();
+    $service = [
+        'type' => trim((string) ($_POST['type'] ?? '')),
+        'name' => trim((string) ($_POST['name'] ?? '')),
+        'address' => trim((string) ($_POST['address'] ?? '')),
+        'phone' => trim((string) ($_POST['phone'] ?? '')),
+        'directions' => trim((string) ($_POST['directions'] ?? '')),
+        'opening_hours' => trim((string) ($_POST['opening_hours'] ?? '')),
+    ];
+    $types = ['pharmacy', 'clinic', 'shop', 'support', 'transport'];
+    if (!in_array($service['type'], $types, true) || mb_strlen($service['name']) < 2 || mb_strlen($service['address']) < 4 || mb_strlen($service['phone']) < 5 || mb_strlen($service['phone']) > 30 || mb_strlen($service['directions']) < 5 || mb_strlen($service['opening_hours']) < 3) {
+        flash('error', 'Complete every local-service field with valid information.');
+        redirect_to('admin/services.php');
+    }
+    admin_create_service($service);
+    flash('success', 'The local service was added' . (is_demo_mode() ? ' for this demo session.' : '.'));
+    redirect_to('admin/services.php');
+}
+
+if ($action === 'admin_delete_service') {
+    require_admin();
+    $serviceId = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT);
+    if (!$serviceId) {
+        flash('error', 'That local service could not be found.');
+        redirect_to('admin/services.php');
+    }
+    admin_delete_service((int) $serviceId);
+    flash('success', 'The local service was deleted.');
+    redirect_to('admin/services.php');
 }
 
 http_response_code(400);

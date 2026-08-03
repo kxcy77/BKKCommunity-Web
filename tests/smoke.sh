@@ -24,7 +24,7 @@ for route in index.php events.php discounts.php info.php contact.php login.php r
   echo "PASS ${route}: HTTP ${code}"
 done
 
-for route in profile.php admin/index.php; do
+for route in profile.php admin/index.php admin/events.php admin/discounts.php admin/services.php admin/messages.php; do
   code="$(curl -sS -o /dev/null -w '%{http_code}' "${base_url}/${route}")"
   [[ "$code" == "302" ]] || { echo "FAIL guest protection ${route}: HTTP ${code}"; exit 1; }
   echo "PASS guest protection ${route}: HTTP ${code}"
@@ -59,3 +59,9 @@ curl -fsS -b "$admin_cookie" -c "$admin_cookie" -o /dev/null \
 admin_html="$(curl -fsS -b "$admin_cookie" "${base_url}/admin/index.php")"
 printf '%s' "$admin_html" | grep -q 'Dashboard overview' || { echo 'FAIL admin login'; exit 1; }
 echo 'PASS admin login and protected dashboard'
+
+for route in admin/events.php admin/discounts.php admin/services.php admin/messages.php; do
+  code="$(curl -sS -b "$admin_cookie" -o /dev/null -w '%{http_code}' "${base_url}/${route}")"
+  [[ "$code" == "200" ]] || { echo "FAIL authenticated ${route}: HTTP ${code}"; exit 1; }
+  echo "PASS authenticated ${route}: HTTP ${code}"
+done

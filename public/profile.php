@@ -10,7 +10,11 @@ $activeNav = '';
 $user = current_user();
 $rsvpIds = rsvp_ids_for_current_user();
 $savedEvents = array_values(array_filter(all_events(), fn (array $event): bool => in_array((int) $event['id'], $rsvpIds, true)));
-$preferences = $_SESSION['notification_preferences'] ?? ['event_reminders' => true, 'discount_alerts' => true];
+$attendanceHistory = attendance_history_for_current_user();
+$preferences = $_SESSION['notification_preferences'] ?? [
+    'event_reminders' => (bool) ($user['event_reminders'] ?? true),
+    'discount_alerts' => (bool) ($user['discount_alerts'] ?? true),
+];
 
 require __DIR__ . '/partials/header.php';
 ?>
@@ -38,6 +42,16 @@ require __DIR__ . '/partials/header.php';
                             </article>
                         <?php endforeach; ?>
                     </div>
+                <?php endif; ?>
+            </section>
+            <section class="panel">
+                <h2>Attendance history</h2>
+                <?php if (!$attendanceHistory): ?>
+                    <div class="empty-state"><p>Your attendance history will appear here after you confirm an event.</p></div>
+                <?php else: ?>
+                    <div class="table-wrap" role="region" aria-label="Attendance history table" tabindex="0"><table class="data-table"><thead><tr><th>Event</th><th>Date</th><th>Location</th><th>Status</th></tr></thead><tbody>
+                        <?php foreach ($attendanceHistory as $attendance): ?><tr><td><strong><?= h($attendance['title']) ?></strong><br><small><?= h($attendance['category']) ?></small></td><td><?= h((new DateTimeImmutable($attendance['date']))->format('d M Y')) ?> at <?= h($attendance['time']) ?></td><td><?= h($attendance['location']) ?></td><td><?= ($attendance['status'] ?? 'attending') === 'attending' ? 'Attending' : 'Cancelled' ?></td></tr><?php endforeach; ?>
+                    </tbody></table></div>
                 <?php endif; ?>
             </section>
             <section class="panel">
@@ -72,4 +86,3 @@ require __DIR__ . '/partials/header.php';
     </div>
 </section>
 <?php require __DIR__ . '/partials/footer.php'; ?>
-

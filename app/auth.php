@@ -35,7 +35,10 @@ function attempt_login(string $email, string $password): bool
     $db = database();
 
     if ($db) {
-        $statement = $db->prepare('SELECT id, full_name, email, phone, role, password_hash FROM users WHERE email = ? LIMIT 1');
+        $statement = $db->prepare('SELECT id, full_name, email, phone, role, password_hash,
+            event_reminders_enabled AS event_reminders,
+            discount_alerts_enabled AS discount_alerts
+            FROM users WHERE email = ? AND deleted_at IS NULL LIMIT 1');
         $statement->execute([$email]);
         $user = $statement->fetch();
         if (!$user || !password_verify($password, $user['password_hash'])) {
@@ -80,8 +83,15 @@ function register_user(array $input): array
         if ($check->fetchColumn()) {
             return [false, 'An account with that email address already exists.'];
         }
-        $statement = $db->prepare('INSERT INTO users (full_name, email, phone, password_hash, role) VALUES (?, ?, ?, ?, \'member\')');
-        $statement->execute([$input['full_name'], $email, $input['phone'], password_hash($input['password'], PASSWORD_DEFAULT)]);
+        try {
+            $statement = $db->prepare('INSERT INTO users (full_name, email, phone, password_hash, role) VALUES (?, ?, ?, ?, \'member\')');
+            $statement->execute([$input['full_name'], $email, $input['phone'], password_hash($input['password'], PASSWORD_DEFAULT)]);
+        } catch (PDOException $exception) {
+            if ($exception->getCode() === '23000') {
+                return [false, 'An account with that email address already exists.'];
+            }
+            throw $exception;
+        }
         return [true, 'Your account was created. You can now log in.'];
     }
 
@@ -103,4 +113,3 @@ function logout_user(): void
     unset($_SESSION['user'], $_SESSION['rsvps']);
     session_regenerate_id(true);
 }
-
