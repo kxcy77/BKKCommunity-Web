@@ -1,0 +1,8 @@
+.env
+.DS_Store
+/vendor/
+/node_modules/
+coverage/
+*.log
+public/uploads/*
+!public/uploads/.gitkeep
