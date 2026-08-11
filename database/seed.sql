@@ -1,5 +1,3 @@
-USE bkk_community;
-
 -- DEMONSTRATION CONTENT ONLY. Replace with client-approved BKK data before UAT.
 INSERT INTO event_categories (name, colour_hex) VALUES
     ('Exercise', '#315C24'),
@@ -46,4 +44,3 @@ INSERT INTO local_services (type, name, address, phone, directions, opening_hour
     ('clinic', 'BKK Community Clinic', '12 Main Road, BKK', '011 555 0101', 'Opposite the community hall.', 'Mon–Fri 08:00–16:00'),
     ('pharmacy', 'Community Pharmacy', '18 Main Road, BKK', '011 555 0102', 'Next to the grocery store.', 'Mon–Sat 08:00–18:00'),
     ('support', 'BKK Community Support Desk', 'BKK Community Hall, Main Road', '072 888 5030', 'Reception desk inside the main entrance.', 'Weekdays 09:00–15:00');
-

@@ -8,6 +8,7 @@ stamp="$(date +%s)"
 test_email="codex.integration.${stamp}@example.test"
 test_name="Integration Member ${stamp}"
 test_message="Integration contact message ${stamp} for persistence verification."
+test_event_title="Integration RSVP Event ${stamp}"
 cookie_jar="$(mktemp /tmp/bkk-db-integration.XXXXXX)"
 
 mysql_test() {
@@ -19,7 +20,7 @@ csrf_from() {
 }
 
 cleanup() {
-  mysql_test "DELETE FROM contact_messages WHERE email='${test_email}'; DELETE FROM users WHERE email='${test_email}';" >/dev/null 2>&1 || true
+  mysql_test "DELETE FROM events WHERE title='${test_event_title}'; DELETE FROM contact_messages WHERE email='${test_email}'; DELETE FROM users WHERE email='${test_email}';" >/dev/null 2>&1 || true
   rm -f "$cookie_jar"
 }
 trap cleanup EXIT
@@ -68,8 +69,11 @@ profile_html="$(curl -fsS -b "$cookie_jar" "${base_url}/profile.php")"
 printf '%s' "$profile_html" | grep -q "$test_name"
 echo 'PASS login and protected profile'
 
+category_id="$(mysql_test 'SELECT id FROM event_categories ORDER BY id LIMIT 1;')"
+mysql_test "INSERT INTO events(category_id,title,description,start_at,end_at,location,directions,status) VALUES (${category_id},'${test_event_title}','RSVP integration event',DATE_ADD(UTC_TIMESTAMP(),INTERVAL 48 HOUR),DATE_ADD(UTC_TIMESTAMP(),INTERVAL 49 HOUR),'BKK Hall','Main entrance','published');" >/dev/null
+event_id="$(mysql_test "SELECT id FROM events WHERE title='${test_event_title}';")"
 events_html="$(curl -fsS -b "$cookie_jar" "${base_url}/events.php")"
-event_id="$(printf '%s' "$events_html" | sed -n 's/.*name="event_id" value="\([0-9][0-9]*\)".*/\1/p' | head -1)"
+printf '%s' "$events_html" | grep -q "$test_event_title"
 csrf="$(printf '%s' "$events_html" | csrf_from)"
 [[ -n "$event_id" ]]
 curl -fsS -b "$cookie_jar" -c "$cookie_jar" -o /dev/null \

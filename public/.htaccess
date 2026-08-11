@@ -1,6 +1,12 @@
 Options -Indexes
 
 RewriteEngine On
+RewriteCond %{HTTP:Authorization} .
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^api/v1(?:/.*)?$ api/v1/index.php [QSA,L]
+
 RewriteCond %{HTTPS} !=on
 RewriteCond %{HTTP_HOST} !^(localhost|127\.0\.0\.1)(:[0-9]+)?$ [NC]
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
@@ -17,4 +23,3 @@ RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 <FilesMatch "^\.">
     Require all denied
 </FilesMatch>
-

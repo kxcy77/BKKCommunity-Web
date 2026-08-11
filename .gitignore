@@ -1,4 +1,6 @@
 .env
+.appdeploy
+.appdeploy-work/
 .DS_Store
 /vendor/
 /node_modules/

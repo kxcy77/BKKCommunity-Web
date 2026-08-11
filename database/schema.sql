@@ -1,9 +1,3 @@
-CREATE DATABASE IF NOT EXISTS bkk_community
-    CHARACTER SET utf8mb4
-    COLLATE utf8mb4_unicode_ci;
-
-USE bkk_community;
-
 CREATE TABLE users (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     full_name VARCHAR(120) NOT NULL,

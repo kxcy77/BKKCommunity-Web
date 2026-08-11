@@ -18,6 +18,7 @@ Responsive evidence is also available in [the mobile home capture](docs/screensh
 - Session-only demonstration mode when MySQL is not configured.
 - Shared MySQL schema compatible with the BKK Android/API project, plus sample content for persistent mode.
 - CSRF protection, secure session cookies, session-level abuse throttling and strict response security headers.
+- Versioned JSON API for the Android app with hashed bearer sessions and database-required writes.
 
 ## Requirements
 
@@ -30,10 +31,12 @@ Responsive evidence is also available in [the mobile home capture](docs/screensh
 
 ```bash
 cd /path/to/BKKCommunity-Web
-php -S 127.0.0.1:8080 -t public
+php -S 127.0.0.1:8080 -t public public/router.php
 ```
 
 Open <http://127.0.0.1:8080>. Without a `.env` file containing database credentials, the application clearly identifies itself as a session-only demo.
+
+The `/api/v1` routes deliberately do not use the browser's session-only demo mode. If MySQL is unavailable they return HTTP 503 and confirm that nothing was saved. This prevents the Android app from displaying false success for contact, account or attendance actions.
 
 Demo member: `member@bkk.demo` / `MemberDemo!26`
 
@@ -61,7 +64,10 @@ find app public -type f -name '*.php' -print0 | xargs -0 -n1 php -l
 ./tests/smoke.sh
 BKK_BASE_URL=http://127.0.0.1:8080 ./tests/database-integration.sh
 BKK_BASE_URL=http://127.0.0.1:8080 ./tests/admin-database-integration.sh
+BKK_BASE_URL=http://127.0.0.1:8080 ./tests/api-integration.sh
 ```
+
+See [docs/API.md](docs/API.md) for the Android API contract and authentication rules.
 
 The checked-in milestone was also exercised in headless Chrome at 1440px, 390px and 320px. Public-page Axe scans returned zero violations, mobile navigation and mouse-wheel scrolling worked, 320px pages had no horizontal overflow, guest admin access was blocked, and administrator event creation completed successfully. These automated checks do not replace real TalkBack/VoiceOver or elderly-user UAT.
 
