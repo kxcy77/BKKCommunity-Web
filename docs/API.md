@@ -49,3 +49,5 @@ BKK_BASE_URL=http://127.0.0.1:8080 ./tests/api-integration.sh
 ```
 
 The Android emulator reaches the host server through `http://10.0.2.2:8080/api/v1/`. Production must use the configured HTTPS Railway endpoint.
+
+Verified production base URL: `https://bkk-community-platform-production.up.railway.app/api/v1/`.

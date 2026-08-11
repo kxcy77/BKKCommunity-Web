@@ -71,14 +71,12 @@ See [docs/API.md](docs/API.md) for the Android API contract and authentication r
 
 The checked-in milestone was also exercised in headless Chrome at 1440px, 390px and 320px. Public-page Axe scans returned zero violations, mobile navigation and mouse-wheel scrolling worked, 320px pages had no horizontal overflow, guest admin access was blocked, and administrator event creation completed successfully. These automated checks do not replace real TalkBack/VoiceOver or elderly-user UAT.
 
-## Production blockers
+## Production status and remaining blockers
 
-The core website is database-backed and its member/admin workflows have automated integration coverage. It is not a permanent production deployment until the following external services and operational work are completed:
+The core website and `/api/v1` Android API are deployed to Railway over HTTPS with MySQL-backed content. Deployment does not make the project production-complete; the following external services and operational work remain:
 
 - Replace all demonstration events, offers and service details with stakeholder-verified information.
 - Configure and test transactional email delivery for password-reset messages. Saving contact messages works without email because administrators can read them in the protected inbox.
-- Deploy PHP and MySQL to permanent hosting with a domain; a development server or quick tunnel is not an uptime solution.
-- Serve only over HTTPS and configure secure headers at the hosting layer.
 - Add host-level/IP rate limiting, bot protection, automated encrypted backups and uptime/error monitoring.
 - Wire a scheduled delivery provider for actual event-reminder and discount-alert messages; the preference data is already persisted.
 - Complete real browser, screen-reader, 200% text-scale and elderly-user acceptance testing.
