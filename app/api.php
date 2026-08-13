@@ -31,9 +31,17 @@ function api_database(): PDO
 
 function api_input(): array
 {
+    $maximumBytes = 32768;
+    $declaredLength = filter_var($_SERVER['CONTENT_LENGTH'] ?? null, FILTER_VALIDATE_INT);
+    if ($declaredLength !== false && $declaredLength > $maximumBytes) {
+        api_error(413, 'The request body is too large.', 'payload_too_large');
+    }
     $raw = file_get_contents('php://input');
     if ($raw === false || trim($raw) === '') {
         return [];
+    }
+    if (strlen($raw) > $maximumBytes) {
+        api_error(413, 'The request body is too large.', 'payload_too_large');
     }
     try {
         $decoded = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);

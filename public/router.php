@@ -14,4 +14,7 @@ if ($path === '/health' || $path === '/ready' || $path === '/api/v1' || str_star
     return true;
 }
 
-return false;
+http_response_code(404);
+header('Content-Type: text/plain; charset=UTF-8');
+echo 'Not found.';
+return true;

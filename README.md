@@ -25,7 +25,7 @@ Responsive evidence is also available in [the mobile home capture](docs/screensh
 
 ## Requirements
 
-- PHP 8.3 or newer with PDO MySQL and mbstring.
+- PHP 8.3 or newer with PDO MySQL and mbstring. The production image uses Nginx and PHP-FPM.
 - MySQL 8 or newer for persistent production data.
 - Vendored Bootstrap 5.3.8 plus the BKK design system; no CDN dependency.
 - A modern browser. No Node.js runtime is required.

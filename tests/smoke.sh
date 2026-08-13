@@ -34,6 +34,15 @@ ready_code="$(curl -sS -o /tmp/bkk-ready.json -w '%{http_code}' "${base_url}/rea
 php -r '$json=json_decode(file_get_contents("/tmp/bkk-ready.json"), true); if (($json["error"]["code"] ?? null) !== "database_unavailable") exit(1);'
 echo 'PASS readiness fails closed without a database'
 
+unknown_code="$(curl -sS -o /dev/null -w '%{http_code}' "${base_url}/not-a-real-route")"
+[[ "$unknown_code" == "404" ]] || { echo "FAIL unknown route: HTTP ${unknown_code}"; exit 1; }
+echo 'PASS unknown routes return 404'
+
+large_body_code="$(php -r 'echo str_repeat("x", 33000);' | curl -sS -o /tmp/bkk-large-body.json -w '%{http_code}' -H 'Content-Type: application/json' --data-binary @- "${base_url}/api/v1/auth/login")"
+[[ "$large_body_code" == "413" ]] || { echo "FAIL oversized API body: HTTP ${large_body_code}"; exit 1; }
+php -r '$json=json_decode(file_get_contents("/tmp/bkk-large-body.json"), true); if (($json["error"]["code"] ?? null) !== "payload_too_large") exit(1);'
+echo 'PASS oversized API bodies are rejected'
+
 for route in profile.php admin/index.php admin/events.php admin/discounts.php admin/services.php admin/messages.php; do
   code="$(curl -sS -o /dev/null -w '%{http_code}' "${base_url}/${route}")"
   [[ "$code" == "302" ]] || { echo "FAIL guest protection ${route}: HTTP ${code}"; exit 1; }

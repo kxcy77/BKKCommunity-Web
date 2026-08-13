@@ -4,10 +4,10 @@ WORKDIR /app
 COPY composer.json composer.lock ./
 RUN composer install --no-dev --prefer-dist --no-interaction --no-progress --optimize-autoloader
 
-FROM php:8.3-cli
+FROM php:8.3-fpm
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends default-mysql-client libonig-dev \
+    && apt-get install -y --no-install-recommends default-mysql-client libonig-dev nginx \
     && docker-php-ext-install pdo_mysql mbstring \
     && rm -rf /var/lib/apt/lists/*
 
@@ -16,6 +16,7 @@ COPY bin /var/www/bin
 COPY database /var/www/database
 COPY public /var/www/html
 COPY .env.example /var/www/.env.example
+COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY --from=vendor /app/vendor /var/www/vendor
 
 RUN chmod +x /var/www/bin/*.sh \
@@ -23,6 +24,4 @@ RUN chmod +x /var/www/bin/*.sh \
 
 EXPOSE 8080
 
-USER www-data
-
-CMD ["sh", "-c", "set -eu; /var/www/bin/migrate.sh; exec php -S 0.0.0.0:${PORT:-8080} -t /var/www/html /var/www/html/router.php"]
+CMD ["sh", "-c", "set -eu; /var/www/bin/migrate.sh; php-fpm -D; exec nginx -g 'daemon off;'"]
