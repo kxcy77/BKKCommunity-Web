@@ -12,10 +12,10 @@ INSERT INTO discount_categories (name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO events (category_id, title, description, start_at, end_at, location, directions)
-SELECT id, 'BKK App Demonstration Event — Not a Real Event',
+SELECT id, 'BKK App Demonstration Event - Not a Real Event',
        'TEST CONTENT ONLY. This event exists so the group can verify event details and RSVP. Do not travel to attend it.',
        DATE_ADD(UTC_TIMESTAMP(), INTERVAL 30 DAY), DATE_ADD(UTC_TIMESTAMP(), INTERVAL 31 DAY),
-       'Demonstration only — do not travel', 'No directions: this is not a real event.'
+       'Demonstration only - do not travel', 'No directions: this is not a real event.'
 FROM event_categories WHERE name = 'Demonstration';
 
 INSERT INTO discounts (category_id, store_name, title, details, eligibility, claim_instructions, is_active)

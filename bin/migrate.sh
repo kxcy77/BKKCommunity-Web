@@ -13,16 +13,17 @@ app_root="${BKK_APP_ROOT:-/var/www}"
 
 mysql_query() {
     MYSQL_PWD="$db_password" mysql --protocol=TCP --host="$DB_HOST" --port="$db_port" \
-        --user="$db_user" --database="$db_name" --batch --skip-column-names --execute="$1"
+        --user="$db_user" --database="$db_name" --default-character-set=utf8mb4 \
+        --batch --skip-column-names --execute="$1"
 }
 
 if [ "${RUN_DATABASE_INITIALIZATION:-false}" = "true" ]; then
     table_count="$(mysql_query "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'users'")"
     if [ "$table_count" = "0" ]; then
         MYSQL_PWD="$db_password" mysql --protocol=TCP --host="$DB_HOST" --port="$db_port" \
-            --user="$db_user" --database="$db_name" < "$app_root/database/schema.sql"
+            --user="$db_user" --database="$db_name" --default-character-set=utf8mb4 < "$app_root/database/schema.sql"
         MYSQL_PWD="$db_password" mysql --protocol=TCP --host="$DB_HOST" --port="$db_port" \
-            --user="$db_user" --database="$db_name" < "$app_root/database/seed.sql"
+            --user="$db_user" --database="$db_name" --default-character-set=utf8mb4 < "$app_root/database/seed.sql"
     fi
 fi
 
@@ -36,7 +37,7 @@ for migration_file in "$app_root"/database/migrations/*.sql; do
     applied="$(mysql_query "SELECT COUNT(*) FROM schema_migrations WHERE migration_name = '${migration_name}'")"
     if [ "$applied" = "0" ]; then
         MYSQL_PWD="$db_password" mysql --protocol=TCP --host="$DB_HOST" --port="$db_port" \
-            --user="$db_user" --database="$db_name" < "$migration_file"
+            --user="$db_user" --database="$db_name" --default-character-set=utf8mb4 < "$migration_file"
         mysql_query "INSERT INTO schema_migrations (migration_name) VALUES ('${migration_name}')" >/dev/null
     fi
 done
