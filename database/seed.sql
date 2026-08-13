@@ -3,7 +3,8 @@ INSERT INTO event_categories (name, colour_hex) VALUES
     ('Exercise', '#315C24'),
     ('Social', '#2E75B6'),
     ('Health', '#B00020'),
-    ('Meeting', '#BF7600')
+    ('Meeting', '#BF7600'),
+    ('Demonstration', '#007C83')
 ON DUPLICATE KEY UPDATE colour_hex = VALUES(colour_hex);
 
 INSERT INTO discount_categories (name) VALUES
@@ -11,19 +12,11 @@ INSERT INTO discount_categories (name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO events (category_id, title, description, start_at, end_at, location, directions)
-SELECT id, 'Morning Exercise', 'A gentle, guided exercise session suitable for all mobility levels.',
-       '2026-08-03 07:00:00', '2026-08-03 07:45:00', 'BKK Community Hall', 'Main hall entrance, Block B.'
-FROM event_categories WHERE name = 'Exercise';
-
-INSERT INTO events (category_id, title, description, start_at, end_at, location, directions)
-SELECT id, 'Social Lunch Gathering', 'Share lunch and connect with other community members.',
-       '2026-08-05 10:00:00', '2026-08-05 11:30:00', 'BKK Hall', 'Main Road entrance.'
-FROM event_categories WHERE name = 'Social';
-
-INSERT INTO events (category_id, title, description, start_at, end_at, location, directions)
-SELECT id, 'Health Talk: Managing Diabetes', 'A practical health information session with time for questions.',
-       '2026-08-07 12:00:00', '2026-08-07 13:30:00', 'Clinic Room 2', 'Use the reception entrance.'
-FROM event_categories WHERE name = 'Health';
+SELECT id, 'BKK App Demonstration Event — Not a Real Event',
+       'TEST CONTENT ONLY. This event exists so the group can verify event details and RSVP. Do not travel to attend it.',
+       DATE_ADD(UTC_TIMESTAMP(), INTERVAL 30 DAY), DATE_ADD(UTC_TIMESTAMP(), INTERVAL 31 DAY),
+       'Demonstration only — do not travel', 'No directions: this is not a real event.'
+FROM event_categories WHERE name = 'Demonstration';
 
 INSERT INTO discounts (category_id, store_name, title, details, eligibility, claim_instructions, is_active)
 SELECT id, 'Clicks', '10% off selected prescriptions', 'Selected prescription items qualify for a pensioner discount.',

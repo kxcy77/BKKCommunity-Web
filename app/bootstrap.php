@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 $config = require __DIR__ . '/config.php';
 
+$composerAutoloader = dirname(__DIR__) . '/vendor/autoload.php';
+if (is_file($composerAutoloader)) {
+    require_once $composerAutoloader;
+}
+
 date_default_timezone_set('Africa/Johannesburg');
 
 $requestIsHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
@@ -13,6 +18,7 @@ if (!$requestIsHttps && !empty($config['trust_proxy'])) {
 }
 
 if (!headers_sent()) {
+    header_remove('X-Powered-By');
     header('X-Content-Type-Options: nosniff');
     header('X-Frame-Options: DENY');
     header('Referrer-Policy: strict-origin-when-cross-origin');
@@ -23,7 +29,11 @@ if (!headers_sent()) {
     }
 }
 
-if (session_status() !== PHP_SESSION_ACTIVE) {
+$requestPath = parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/';
+$statelessRequest = $requestPath === '/health' || $requestPath === '/ready'
+    || $requestPath === '/api/v1' || str_starts_with($requestPath, '/api/v1/');
+
+if (!$statelessRequest && session_status() !== PHP_SESSION_ACTIVE) {
     ini_set('session.use_strict_mode', '1');
     session_name((string) $config['session_name']);
     session_set_cookie_params([
@@ -38,6 +48,9 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 require_once __DIR__ . '/data.php';
 require_once __DIR__ . '/repository.php';
 require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/mail.php';
+require_once __DIR__ . '/password_reset.php';
+require_once __DIR__ . '/rate_limit.php';
 
 function app_config(?string $key = null): mixed
 {

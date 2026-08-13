@@ -22,7 +22,9 @@ if ($action === 'logout') {
 if ($action === 'login') {
     $email = trim((string) ($_POST['email'] ?? ''));
     $password = (string) ($_POST['password'] ?? '');
-    if (rate_limit_blocked('login', 8, 900)) {
+    if (rate_limit_blocked('login', 8, 900)
+        || persistent_rate_limit_exceeded('web-login-ip', 60, 900)
+        || persistent_rate_limit_exceeded('web-login-account', 10, 900, $email)) {
         flash('error', 'Too many login attempts. Wait 15 minutes before trying again.');
         redirect_to('login.php');
     }
@@ -44,7 +46,8 @@ if ($action === 'login') {
 }
 
 if ($action === 'register') {
-    if (rate_limit_blocked('register', 5, 3600)) {
+    if (rate_limit_blocked('register', 5, 3600)
+        || persistent_rate_limit_exceeded('web-register-ip', 5, 3600)) {
         flash('error', 'Too many registration attempts. Wait before trying again.');
         redirect_to('register.php');
     }
@@ -83,7 +86,9 @@ if ($action === 'register') {
 
 if ($action === 'request_reset') {
     $email = strtolower(trim((string) ($_POST['email'] ?? '')));
-    if (rate_limit_blocked('password_reset', 5, 3600)) {
+    if (rate_limit_blocked('password_reset', 5, 3600)
+        || persistent_rate_limit_exceeded('web-forgot-password-ip', 20, 3600)
+        || persistent_rate_limit_exceeded('web-forgot-password-account', 5, 3600, $email)) {
         flash('info', 'If an account matches that address, reset instructions will be sent.');
         redirect_to('login.php');
     }
@@ -92,70 +97,57 @@ if ($action === 'request_reset') {
         flash('error', 'Enter a valid email address.');
         redirect_to('reset-password.php');
     }
-    $db = database();
-    $mailFrom = trim((string) app_config('mail_from'));
-    if ($db && $mailFrom !== '') {
-        $statement = $db->prepare('SELECT id FROM users WHERE email = ? AND deleted_at IS NULL LIMIT 1');
-        $statement->execute([$email]);
-        $userId = $statement->fetchColumn();
-        if ($userId) {
-            $rawToken = bin2hex(random_bytes(32));
-            $db->prepare('DELETE FROM password_reset_tokens WHERE user_id = ?')->execute([$userId]);
-            $insert = $db->prepare('INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))');
-            $insert->execute([$userId, hash('sha256', $rawToken)]);
-            $link = rtrim((string) app_config('app_url'), '/') . app_url('new-password.php?token=' . rawurlencode($rawToken));
-            $subject = 'Reset your BKK Community password';
-            $body = "A password reset was requested for your BKK Community account.\n\nUse this link within one hour:\n{$link}\n\nIf you did not request this, ignore this email.";
-            $headers = "From: {$mailFrom}\r\nContent-Type: text/plain; charset=UTF-8";
-            if (!mail($email, $subject, $body, $headers)) {
-                $db->prepare('DELETE FROM password_reset_tokens WHERE user_id = ?')->execute([$userId]);
-                error_log('BKK password reset email could not be sent.');
-            }
-        }
+    if (is_demo_mode() || password_reset_mail_configuration_error() !== null) {
+        flash('error', 'Password-reset email is temporarily unavailable. Please contact BKK Community support.');
+        redirect_to('reset-password.php');
     }
-    $suffix = is_demo_mode() ? ' Demo mode does not send email.' : ($mailFrom === '' ? ' Email delivery is not configured yet.' : ' Check your inbox and spam folder.');
-    flash('info', 'If an account matches that address, reset instructions will be sent.' . $suffix);
-    redirect_to('login.php');
+    try {
+        issue_password_reset_code($email);
+    } catch (Throwable $exception) {
+        error_log('BKK web password reset delivery failed: ' . $exception::class);
+        flash('error', 'Password-reset email is temporarily unavailable. Please try again later.');
+        redirect_to('reset-password.php');
+    }
+    $_SESSION['password_reset_email'] = $email;
+    flash('info', PASSWORD_RESET_PUBLIC_MESSAGE . ' Check your inbox and spam folder.');
+    redirect_to('new-password.php');
 }
 
 if ($action === 'complete_reset') {
+    $email = normalise_account_email((string) ($_POST['email'] ?? ''));
     $token = trim((string) ($_POST['token'] ?? ''));
     $password = (string) ($_POST['password'] ?? '');
     $confirmation = (string) ($_POST['password_confirmation'] ?? '');
-    $passwordIsStrong = strlen($password) >= 10 && preg_match('/[a-z]/', $password) && preg_match('/[A-Z]/', $password) && preg_match('/\d/', $password);
-    if (!preg_match('/^[a-f0-9]{64}$/', $token) || !$passwordIsStrong || !hash_equals($password, $confirmation)) {
-        flash('error', 'The reset link or new password was invalid. Use at least 10 characters with upper- and lowercase letters and a number.');
-        redirect_to('new-password.php?token=' . rawurlencode($token));
+    $passwordIsStrong = strlen($password) >= 8 && strlen($password) <= 128 && preg_match('/[A-Za-z]/', $password) && preg_match('/\d/', $password);
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL) || !preg_match('/^\d{6}$/', $token) || !$passwordIsStrong || !hash_equals($password, $confirmation)) {
+        flash('error', 'Enter your account email, the 6-digit code, and matching passwords of at least 8 characters with a letter and number.');
+        redirect_to('new-password.php');
     }
-    $db = database();
-    if (!$db) {
+    if (is_demo_mode()) {
         flash('error', 'Password reset is unavailable in demonstration mode.');
         redirect_to('login.php');
     }
-    $statement = $db->prepare('SELECT id, user_id FROM password_reset_tokens WHERE token_hash = ? AND used_at IS NULL AND expires_at > NOW() LIMIT 1');
-    $statement->execute([hash('sha256', $token)]);
-    $reset = $statement->fetch();
-    if (!$reset) {
-        flash('error', 'That reset link is invalid or has expired. Request a new one.');
-        redirect_to('reset-password.php');
-    }
-    $db->beginTransaction();
     try {
-        $db->prepare('UPDATE users SET password_hash = ? WHERE id = ?')->execute([password_hash($password, PASSWORD_DEFAULT), $reset['user_id']]);
-        $db->prepare('UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?')->execute([$reset['id']]);
-        $db->commit();
+        $updated = consume_password_reset_code($email, $token, password_hash($password, PASSWORD_DEFAULT));
     } catch (Throwable $exception) {
-        $db->rollBack();
-        error_log('BKK password reset failed: ' . $exception->getMessage());
+        error_log('BKK password reset failed: ' . $exception::class);
         flash('error', 'The password could not be changed. Please try again.');
         redirect_to('reset-password.php');
     }
+    if (!$updated) {
+        flash('error', PASSWORD_RESET_INVALID_MESSAGE);
+        redirect_to('new-password.php');
+    }
+    unset($_SESSION['password_reset_email']);
     flash('success', 'Your password was changed. You can now log in.');
     redirect_to('login.php');
 }
 
 if ($action === 'contact') {
-    if (rate_limit_blocked('contact', 5, 600)) {
+    $contactEmail = trim((string) ($_POST['email'] ?? ''));
+    if (rate_limit_blocked('contact', 5, 600)
+        || persistent_rate_limit_exceeded('web-contact-ip', 10, 600)
+        || persistent_rate_limit_exceeded('web-contact-account', 5, 600, $contactEmail)) {
         flash('error', 'Too many messages were submitted. Wait 10 minutes before trying again.');
         redirect_to('contact.php');
     }

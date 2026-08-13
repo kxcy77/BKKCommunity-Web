@@ -29,10 +29,12 @@ CREATE TABLE password_reset_tokens (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT UNSIGNED NOT NULL,
     token_hash CHAR(64) NOT NULL UNIQUE,
+    failed_attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
     expires_at DATETIME NOT NULL,
     used_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_reset_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    CONSTRAINT fk_reset_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_reset_user_active (user_id, expires_at, used_at)
 );
 
 CREATE TABLE event_categories (
@@ -151,4 +153,13 @@ CREATE TABLE notification_log (
     CONSTRAINT fk_notification_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE SET NULL,
     CONSTRAINT fk_notification_discount FOREIGN KEY (discount_id) REFERENCES discounts(id) ON DELETE SET NULL,
     INDEX idx_notification_delivery (delivery_status, created_at)
+);
+
+CREATE TABLE api_rate_limits (
+    key_hash CHAR(64) PRIMARY KEY,
+    scope VARCHAR(60) NOT NULL,
+    request_count INT UNSIGNED NOT NULL DEFAULT 1,
+    expires_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_api_rate_limit_expiry (expires_at)
 );

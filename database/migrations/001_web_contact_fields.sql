@@ -1,5 +1,3 @@
-USE bkk_community;
-
 DROP PROCEDURE IF EXISTS add_web_contact_fields;
 DELIMITER //
 CREATE PROCEDURE add_web_contact_fields()

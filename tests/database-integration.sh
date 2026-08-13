@@ -9,6 +9,7 @@ test_email="codex.integration.${stamp}@example.test"
 test_name="Integration Member ${stamp}"
 test_message="Integration contact message ${stamp} for persistence verification."
 test_event_title="Integration RSVP Event ${stamp}"
+reset_secret="${BKK_TEST_RESET_CODE_SECRET:?Set BKK_TEST_RESET_CODE_SECRET to the same value used by the test server}"
 cookie_jar="$(mktemp /tmp/bkk-db-integration.XXXXXX)"
 
 mysql_test() {
@@ -20,7 +21,7 @@ csrf_from() {
 }
 
 cleanup() {
-  mysql_test "DELETE FROM events WHERE title='${test_event_title}'; DELETE FROM contact_messages WHERE email='${test_email}'; DELETE FROM users WHERE email='${test_email}';" >/dev/null 2>&1 || true
+  mysql_test "DELETE FROM events WHERE title='${test_event_title}'; DELETE FROM contact_messages WHERE email='${test_email}'; DELETE FROM users WHERE email='${test_email}'; DELETE FROM api_rate_limits WHERE scope LIKE 'web-%';" >/dev/null 2>&1 || true
   rm -f "$cookie_jar"
 }
 trap cleanup EXIT
@@ -42,20 +43,21 @@ curl -fsS -b "$cookie_jar" -c "$cookie_jar" -o /dev/null \
 echo 'PASS registration persisted'
 
 user_id="$(mysql_test "SELECT id FROM users WHERE email='${test_email}';")"
-printf -v reset_token '%064x' "$stamp"
-token_hash="$(printf '%s' "$reset_token" | shasum -a 256 | awk '{print $1}')"
-mysql_test "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (${user_id}, '${token_hash}', DATE_ADD(NOW(), INTERVAL 1 HOUR));" >/dev/null
-reset_html="$(curl -fsS -b "$cookie_jar" -c "$cookie_jar" "${base_url}/new-password.php?token=${reset_token}")"
+reset_code="123456"
+token_hash="$(php -r 'echo hash_hmac("sha256", $argv[1].":".$argv[2].":".$argv[3], $argv[4]);' "$user_id" "$test_email" "$reset_code" "$reset_secret")"
+mysql_test "INSERT INTO password_reset_tokens (user_id, token_hash, failed_attempts, expires_at) VALUES (${user_id}, '${token_hash}', 0, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 MINUTE));" >/dev/null
+reset_html="$(curl -fsS -b "$cookie_jar" -c "$cookie_jar" "${base_url}/new-password.php")"
 csrf="$(printf '%s' "$reset_html" | csrf_from)"
 curl -fsS -b "$cookie_jar" -c "$cookie_jar" -o /dev/null \
   --data-urlencode "csrf_token=${csrf}" \
   --data-urlencode 'action=complete_reset' \
-  --data-urlencode "token=${reset_token}" \
+  --data-urlencode "email=${test_email}" \
+  --data-urlencode "token=${reset_code}" \
   --data-urlencode 'password=NewStrongPass26' \
   --data-urlencode 'password_confirmation=NewStrongPass26' \
   "${base_url}/actions.php"
 [[ "$(mysql_test "SELECT COUNT(*) FROM password_reset_tokens WHERE user_id=${user_id} AND used_at IS NOT NULL;")" == '1' ]]
-echo 'PASS password reset token consumed'
+echo 'PASS email-bound 6-digit password reset code consumed'
 
 login_html="$(curl -fsS -b "$cookie_jar" -c "$cookie_jar" "${base_url}/login.php")"
 csrf="$(printf '%s' "$login_html" | csrf_from)"

@@ -49,6 +49,9 @@ function api_input(): array
 function api_path(): string
 {
     $path = parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/';
+    if ($path === '/health' || $path === '/ready') {
+        return $path;
+    }
     $marker = '/api/v1';
     $position = strpos($path, $marker);
     if ($position === false) {
@@ -69,6 +72,15 @@ function api_bearer_token(): ?string
         api_error(401, 'The authentication token is invalid.', 'invalid_token');
     }
     return strtolower($matches[1]);
+}
+
+function api_rate_limit(string $scope, int $limit, int $windowSeconds, ?string $accountKey = null): void
+{
+    api_database();
+    if (persistent_rate_limit_exceeded($scope, $limit, $windowSeconds, $accountKey)) {
+        header('Retry-After: ' . rate_limit_retry_after($windowSeconds));
+        api_error(429, 'Too many requests. Wait before trying again.', 'rate_limited');
+    }
 }
 
 function api_current_user(bool $required = true): ?array
@@ -122,10 +134,33 @@ function api_issue_token(PDO $db, int $userId): string
 
 function api_password_is_strong(string $password): bool
 {
-    return strlen($password) >= 10 && strlen($password) <= 128
-        && preg_match('/[a-z]/', $password)
-        && preg_match('/[A-Z]/', $password)
+    return strlen($password) >= 8 && strlen($password) <= 128
+        && preg_match('/[A-Za-z]/', $password)
         && preg_match('/\d/', $password);
+}
+
+function api_health(): never
+{
+    api_respond([
+        'status' => 'ok',
+        'service' => 'bkk-community-platform',
+    ]);
+}
+
+function api_ready(): never
+{
+    $db = api_database();
+    $requiredTables = ['users', 'auth_sessions', 'password_reset_tokens', 'events', 'discounts', 'local_services', 'api_rate_limits', 'schema_migrations'];
+    $placeholders = implode(',', array_fill(0, count($requiredTables), '?'));
+    $statement = $db->prepare("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ({$placeholders})");
+    $statement->execute($requiredTables);
+    if ((int) $statement->fetchColumn() !== count($requiredTables)) {
+        api_error(503, 'The database schema is not ready.', 'schema_unavailable');
+    }
+    api_respond([
+        'status' => 'ready',
+        'database' => 'connected',
+    ]);
 }
 
 function api_event(array $row): array
@@ -178,6 +213,7 @@ function api_register(): never
     $email = strtolower(trim((string) ($input['email'] ?? '')));
     $phone = trim((string) ($input['phone'] ?? '')) ?: null;
     $password = (string) ($input['password'] ?? '');
+    api_rate_limit('register', 5, 3600);
     if (mb_strlen($name) < 2 || mb_strlen($name) > 120 || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 190) {
         api_error(422, 'Enter your full name and a valid email address.', 'validation_error');
     }
@@ -185,7 +221,7 @@ function api_register(): never
         api_error(422, 'The phone number is too long.', 'validation_error');
     }
     if (!api_password_is_strong($password)) {
-        api_error(422, 'Use at least 10 characters with upper- and lowercase letters and a number.', 'weak_password');
+        api_error(422, 'Use at least 8 characters with a letter and a number.', 'weak_password');
     }
 
     $db = api_database();
@@ -217,6 +253,8 @@ function api_login(): never
     $input = api_input();
     $email = strtolower(trim((string) ($input['email'] ?? '')));
     $password = (string) ($input['password'] ?? '');
+    api_rate_limit('login-ip', 60, 900);
+    api_rate_limit('login-account', 10, 900, $email);
     if (!filter_var($email, FILTER_VALIDATE_EMAIL) || $password === '') {
         api_error(422, 'Enter a valid email address and password.', 'validation_error');
     }
@@ -239,55 +277,41 @@ function api_forgot_password(): never
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         api_error(422, 'Enter a valid email address.', 'validation_error');
     }
-    $db = api_database();
-    $mailFrom = trim((string) app_config('mail_from'));
-    if ($mailFrom === '') {
+    api_rate_limit('forgot-password-ip', 20, 3600);
+    api_rate_limit('forgot-password-account', 5, 3600, $email);
+    api_database();
+    if (password_reset_mail_configuration_error() !== null) {
         api_error(503, 'Password reset email is not configured. Please contact BKK Community support.', 'email_unavailable');
     }
-    if ($mailFrom !== '') {
-        $statement = $db->prepare('SELECT id FROM users WHERE email = ? AND deleted_at IS NULL LIMIT 1');
-        $statement->execute([$email]);
-        $userId = $statement->fetchColumn();
-        if ($userId) {
-            $token = bin2hex(random_bytes(32));
-            $db->prepare('DELETE FROM password_reset_tokens WHERE user_id = ?')->execute([$userId]);
-            $db->prepare('INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 HOUR))')
-                ->execute([$userId, hash('sha256', $token)]);
-            $link = rtrim((string) app_config('app_url'), '/') . app_url('new-password.php?token=' . rawurlencode($token));
-            $headers = "From: {$mailFrom}\r\nContent-Type: text/plain; charset=UTF-8";
-            if (!mail($email, 'Reset your BKK Community password', "Use this link within one hour:\n{$link}", $headers)) {
-                $db->prepare('DELETE FROM password_reset_tokens WHERE user_id = ?')->execute([$userId]);
-                error_log('BKK API password reset email could not be sent.');
-            }
-        }
+    try {
+        issue_password_reset_code($email);
+    } catch (Throwable $exception) {
+        // Keep the public response account-neutral. issue_password_reset_code()
+        // invalidates the code before this point if SMTP delivery failed.
+        error_log('BKK API password reset delivery failed: ' . $exception::class);
     }
-    api_respond(['message' => 'If the account exists, reset instructions have been sent.']);
+    api_respond(['message' => PASSWORD_RESET_PUBLIC_MESSAGE]);
 }
 
 function api_reset_password(): never
 {
     $input = api_input();
-    $token = strtolower(trim((string) ($input['token'] ?? '')));
+    $email = normalise_account_email((string) ($input['email'] ?? ''));
+    $token = trim((string) ($input['token'] ?? ''));
     $password = (string) ($input['password'] ?? '');
-    if (!preg_match('/^[a-f0-9]{64}$/', $token) || !api_password_is_strong($password)) {
-        api_error(422, 'The reset token or new password is invalid.', 'validation_error');
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL) || !preg_match('/^\d{6}$/', $token) || !api_password_is_strong($password)) {
+        api_error(422, 'Enter your account email, the 6-digit code, and a password of at least 8 characters with a letter and number.', 'validation_error');
     }
-    $db = api_database();
-    $statement = $db->prepare('SELECT id, user_id FROM password_reset_tokens WHERE token_hash = ? AND used_at IS NULL AND expires_at > UTC_TIMESTAMP() LIMIT 1');
-    $statement->execute([hash('sha256', $token)]);
-    $reset = $statement->fetch();
-    if (!$reset) {
-        api_error(422, 'That reset link is invalid or has expired.', 'invalid_reset_token');
-    }
-    $db->beginTransaction();
+    api_rate_limit('reset-password-ip', 30, 900);
+    api_rate_limit('reset-password-account', 10, 900, $email);
     try {
-        $db->prepare('UPDATE users SET password_hash = ? WHERE id = ?')->execute([password_hash($password, PASSWORD_DEFAULT), $reset['user_id']]);
-        $db->prepare('UPDATE password_reset_tokens SET used_at = UTC_TIMESTAMP() WHERE id = ?')->execute([$reset['id']]);
-        $db->prepare('UPDATE auth_sessions SET revoked_at = UTC_TIMESTAMP() WHERE user_id = ? AND revoked_at IS NULL')->execute([$reset['user_id']]);
-        $db->commit();
-    } catch (Throwable $exception) {
-        $db->rollBack();
-        throw $exception;
+        $updated = consume_password_reset_code($email, $token, password_hash($password, PASSWORD_DEFAULT));
+    } catch (RuntimeException $exception) {
+        error_log('BKK API password reset unavailable: ' . $exception::class);
+        api_error(503, 'Password reset is temporarily unavailable. Please try again later.', 'reset_unavailable');
+    }
+    if (!$updated) {
+        api_error(422, PASSWORD_RESET_INVALID_MESSAGE, 'invalid_reset_code');
     }
     api_respond(['message' => 'Your password has been updated.']);
 }
@@ -415,6 +439,8 @@ function api_contact(): never
     $name = trim((string) ($input['name'] ?? ''));
     $email = strtolower(trim((string) ($input['email'] ?? '')));
     $message = trim((string) ($input['message'] ?? ''));
+    api_rate_limit('contact-ip', 10, 600);
+    api_rate_limit('contact-account', 5, 600, $email);
     if (mb_strlen($name) < 2 || mb_strlen($name) > 120 || !filter_var($email, FILTER_VALIDATE_EMAIL)
         || mb_strlen($message) < 10 || mb_strlen($message) > 3000) {
         api_error(422, 'Enter your name, a valid email address, and a message between 10 and 3,000 characters.', 'validation_error');
@@ -489,6 +515,9 @@ function api_dispatch(): never
     }
     $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
     $path = api_path();
+
+    if ($method === 'GET' && $path === '/health') api_health();
+    if ($method === 'GET' && $path === '/ready') api_ready();
 
     if ($method === 'POST' && $path === '/auth/register') api_register();
     if ($method === 'POST' && $path === '/auth/login') api_login();

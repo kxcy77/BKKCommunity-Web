@@ -7,7 +7,7 @@ base_url="http://127.0.0.1:${test_port}"
 server_log="$(mktemp /tmp/bkk-web-server.XXXXXX)"
 cookie_jar="$(mktemp /tmp/bkk-web-cookie.XXXXXX)"
 
-php -S "127.0.0.1:${test_port}" -t "${project_dir}/public" >"${server_log}" 2>&1 &
+php -S "127.0.0.1:${test_port}" -t "${project_dir}/public" "${project_dir}/public/router.php" >"${server_log}" 2>&1 &
 server_pid=$!
 trap 'kill "$server_pid" 2>/dev/null || true' EXIT
 
@@ -23,6 +23,16 @@ for route in index.php events.php discounts.php info.php contact.php login.php r
   [[ "$code" == "200" ]] || { echo "FAIL ${route}: HTTP ${code}"; exit 1; }
   echo "PASS ${route}: HTTP ${code}"
 done
+
+health_code="$(curl -sS -o /tmp/bkk-health.json -w '%{http_code}' "${base_url}/health")"
+[[ "$health_code" == "200" ]] || { echo "FAIL health: HTTP ${health_code}"; exit 1; }
+php -r '$json=json_decode(file_get_contents("/tmp/bkk-health.json"), true); if (($json["data"]["status"] ?? null) !== "ok") exit(1);'
+echo 'PASS health reports the running service'
+
+ready_code="$(curl -sS -o /tmp/bkk-ready.json -w '%{http_code}' "${base_url}/ready")"
+[[ "$ready_code" == "503" ]] || { echo "FAIL unconfigured readiness: HTTP ${ready_code}"; exit 1; }
+php -r '$json=json_decode(file_get_contents("/tmp/bkk-ready.json"), true); if (($json["error"]["code"] ?? null) !== "database_unavailable") exit(1);'
+echo 'PASS readiness fails closed without a database'
 
 for route in profile.php admin/index.php admin/events.php admin/discounts.php admin/services.php admin/messages.php; do
   code="$(curl -sS -o /dev/null -w '%{http_code}' "${base_url}/${route}")"

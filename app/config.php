@@ -37,7 +37,16 @@ return [
     'base_path' => rtrim((string) env_value('APP_BASE_PATH', ''), '/'),
     'session_name' => env_value('APP_SESSION_NAME', 'bkk_community_session'),
     'trust_proxy' => filter_var(env_value('APP_TRUST_PROXY', 'false'), FILTER_VALIDATE_BOOL),
-    'mail_from' => env_value('MAIL_FROM', ''),
+    'reset_code_secret' => env_value('RESET_CODE_SECRET', ''),
+    'mail' => [
+        'host' => env_value('SMTP_HOST', ''),
+        'port' => env_value('SMTP_PORT', '587'),
+        'username' => env_value('SMTP_USER', ''),
+        'password' => env_value('SMTP_PASSWORD', ''),
+        'encryption' => strtolower((string) env_value('SMTP_ENCRYPTION', 'tls')),
+        'from_address' => env_value('MAIL_FROM', ''),
+        'from_name' => env_value('MAIL_FROM_NAME', 'BKK Community'),
+    ],
     'db' => [
         'host' => env_value('DB_HOST', ''),
         'port' => env_value('DB_PORT', '3306'),

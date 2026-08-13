@@ -8,6 +8,7 @@ stamp="$(date +%s)"
 test_email="android.api.${stamp}@example.test"
 event_title="Android API Test ${stamp}"
 fcm_token="integration-fcm-token-${stamp}"
+reset_secret="${BKK_TEST_RESET_CODE_SECRET:?Set BKK_TEST_RESET_CODE_SECRET to the same value used by the test server}"
 
 mysql_test() {
   mysql -N -B -u "$database_user" -D "$database_name" -e "$1"
@@ -19,13 +20,17 @@ json_value() {
 }
 
 cleanup() {
-  mysql_test "DELETE FROM events WHERE title='${event_title}'; DELETE FROM contact_messages WHERE email='${test_email}'; DELETE FROM devices WHERE fcm_token='${fcm_token}'; DELETE FROM users WHERE email='${test_email}';" >/dev/null 2>&1 || true
+  mysql_test "DELETE FROM events WHERE title='${event_title}'; DELETE FROM contact_messages WHERE email='${test_email}'; DELETE FROM devices WHERE fcm_token='${fcm_token}'; DELETE FROM users WHERE email='${test_email}'; DELETE FROM api_rate_limits WHERE scope IN ('register','login-ip','login-account','forgot-password-ip','forgot-password-account','reset-password-ip','reset-password-account','contact-ip','contact-account');" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
 category_id="$(mysql_test 'SELECT id FROM event_categories ORDER BY id LIMIT 1;')"
 mysql_test "INSERT INTO events(category_id,title,description,start_at,end_at,location,directions,status) VALUES (${category_id},'${event_title}','Integration event',DATE_ADD(UTC_TIMESTAMP(),INTERVAL 48 HOUR),DATE_ADD(UTC_TIMESTAMP(),INTERVAL 49 HOUR),'BKK Hall','Main entrance','published');" >/dev/null
 event_id="$(mysql_test "SELECT id FROM events WHERE title='${event_title}';")"
+
+curl -fsS "${base_url}/health" | php -r '$json=json_decode(stream_get_contents(STDIN), true); if (($json["data"]["status"] ?? null) !== "ok") exit(1);'
+curl -fsS "${base_url}/ready" | php -r '$json=json_decode(stream_get_contents(STDIN), true); if (($json["data"]["status"] ?? null) !== "ready") exit(1);'
+echo 'PASS health and database readiness contracts'
 
 register="$(curl -fsS -H 'Content-Type: application/json' -d "{\"full_name\":\"Android Test Member\",\"email\":\"${test_email}\",\"phone\":\"0715550101\",\"password\":\"StrongPass26\"}" "${base_url}/auth/register")"
 token="$(printf '%s' "$register" | json_value '$json["data"]["token"] ?? null')"
@@ -39,17 +44,27 @@ curl -fsS -H 'Content-Type: application/json' -H "Authorization: Bearer ${token}
 [[ "$(mysql_test "SELECT CONCAT(full_name,':',phone) FROM users WHERE email='${test_email}';")" == 'Updated Android Member:0725550102' ]]
 echo 'PASS authenticated profile read and update persisted'
 
-reset_token="$(printf '%064x' "$stamp")"
-reset_hash="$(printf '%s' "$reset_token" | shasum -a 256 | awk '{print $1}')"
 user_id="$(mysql_test "SELECT id FROM users WHERE email='${test_email}';")"
-mysql_test "INSERT INTO password_reset_tokens(user_id,token_hash,expires_at) VALUES (${user_id},'${reset_hash}',DATE_ADD(UTC_TIMESTAMP(),INTERVAL 1 HOUR));" >/dev/null
-curl -fsS -H 'Content-Type: application/json' -d "{\"token\":\"${reset_token}\",\"password\":\"NewStrongPass27\"}" "${base_url}/auth/reset-password" >/dev/null
+locked_code="654321"
+locked_hash="$(php -r 'echo hash_hmac("sha256", $argv[1].":".$argv[2].":".$argv[3], $argv[4]);' "$user_id" "$test_email" "$locked_code" "$reset_secret")"
+mysql_test "INSERT INTO password_reset_tokens(user_id,token_hash,failed_attempts,expires_at) VALUES (${user_id},'${locked_hash}',0,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 15 MINUTE));" >/dev/null
+for attempt in 1 2 3 4 5; do
+  status="$(curl -sS -o /tmp/bkk-api-wrong-reset.json -w '%{http_code}' -H 'Content-Type: application/json' -d "{\"email\":\"${test_email}\",\"token\":\"000000\",\"password\":\"NewStrongPass27\"}" "${base_url}/auth/reset-password")"
+  [[ "$status" == '422' ]]
+done
+[[ "$(mysql_test "SELECT CONCAT(failed_attempts,':',used_at IS NOT NULL) FROM password_reset_tokens WHERE user_id=${user_id} ORDER BY id DESC LIMIT 1;")" == '5:1' ]]
+echo 'PASS fifth incorrect reset-code attempt invalidated the code'
+
+reset_code="123456"
+reset_hash="$(php -r 'echo hash_hmac("sha256", $argv[1].":".$argv[2].":".$argv[3], $argv[4]);' "$user_id" "$test_email" "$reset_code" "$reset_secret")"
+mysql_test "INSERT INTO password_reset_tokens(user_id,token_hash,failed_attempts,expires_at) VALUES (${user_id},'${reset_hash}',0,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 15 MINUTE));" >/dev/null
+curl -fsS -H 'Content-Type: application/json' -d "{\"email\":\"${test_email}\",\"token\":\"${reset_code}\",\"password\":\"NewStrongPass27\"}" "${base_url}/auth/reset-password" >/dev/null
 status="$(curl -sS -o /tmp/bkk-api-reset-revoked.json -w '%{http_code}' -H "Authorization: Bearer ${token}" "${base_url}/me")"
 [[ "$status" == '401' ]]
 login="$(curl -fsS -H 'Content-Type: application/json' -d "{\"email\":\"${test_email}\",\"password\":\"NewStrongPass27\"}" "${base_url}/auth/login")"
 token="$(printf '%s' "$login" | json_value '$json["data"]["token"] ?? null')"
 [[ "${#token}" -eq 64 ]]
-echo 'PASS password reset revoked old sessions and login issued a new token'
+echo 'PASS email-bound 6-digit password reset revoked old sessions and issued a new login token'
 
 events="$(curl -fsS -H "Authorization: Bearer ${token}" "${base_url}/events")"
 printf '%s' "$events" | php -r '$json=json_decode(stream_get_contents(STDIN), true); if (!is_array($json["data"] ?? null)) exit(1);'
@@ -96,3 +111,14 @@ curl -fsS -H "Authorization: Bearer ${token}" -X DELETE "${base_url}/me" >/dev/n
 [[ "$(mysql_test "SELECT COUNT(*) FROM users WHERE email='${test_email}';")" == '0' ]]
 [[ "$(mysql_test "SELECT COUNT(*) FROM contact_messages WHERE email='${test_email}' AND user_id IS NULL;")" == '1' ]]
 echo 'PASS account deletion removed member data and retained the contact audit record safely'
+
+rate_email="rate-limit.${stamp}@example.test"
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  status="$(curl -sS -o /tmp/bkk-api-rate-limit.json -w '%{http_code}' -H 'Content-Type: application/json' -d "{\"email\":\"${rate_email}\",\"password\":\"WrongPassword27\"}" "${base_url}/auth/login")"
+  [[ "$status" == '401' ]]
+done
+status="$(curl -sS -D /tmp/bkk-api-rate-limit-headers.txt -o /tmp/bkk-api-rate-limit.json -w '%{http_code}' -H 'Content-Type: application/json' -d "{\"email\":\"${rate_email}\",\"password\":\"WrongPassword27\"}" "${base_url}/auth/login")"
+[[ "$status" == '429' ]]
+grep -qi '^Retry-After:' /tmp/bkk-api-rate-limit-headers.txt
+[[ "$(json_value '$json["error"]["code"] ?? null' < /tmp/bkk-api-rate-limit.json)" == 'rate_limited' ]]
+echo 'PASS repeated account login attempts were throttled with Retry-After'

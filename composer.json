@@ -1,0 +1,15 @@
+{
+    "name": "bkk-community/platform",
+    "description": "BKK Community web application and mobile JSON API",
+    "license": "proprietary",
+    "type": "project",
+    "require": {
+        "php": "^8.3",
+        "phpmailer/phpmailer": "^7.1"
+    },
+    "config": {
+        "allow-plugins": {},
+        "optimize-autoloader": true,
+        "sort-packages": true
+    }
+}

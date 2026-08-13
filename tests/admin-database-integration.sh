@@ -22,7 +22,7 @@ csrf_from() {
 }
 
 cleanup() {
-  mysql_test "DELETE FROM contact_messages WHERE email='${test_email}'; DELETE FROM local_services WHERE name='${service_name}'; DELETE d FROM discounts d JOIN discount_categories c ON c.id=d.category_id WHERE d.store_name='${discount_store}'; DELETE e FROM events e JOIN event_categories c ON c.id=e.category_id WHERE e.title='${event_title}'; DELETE FROM discount_categories WHERE name='${category}'; DELETE FROM event_categories WHERE name='${category}'; DELETE FROM users WHERE email='${test_email}';" >/dev/null 2>&1 || true
+  mysql_test "DELETE FROM contact_messages WHERE email='${test_email}'; DELETE FROM local_services WHERE name='${service_name}'; DELETE d FROM discounts d JOIN discount_categories c ON c.id=d.category_id WHERE d.store_name='${discount_store}'; DELETE e FROM events e JOIN event_categories c ON c.id=e.category_id WHERE e.title='${event_title}'; DELETE FROM discount_categories WHERE name='${category}'; DELETE FROM event_categories WHERE name='${category}'; DELETE FROM users WHERE email='${test_email}'; DELETE FROM api_rate_limits WHERE scope LIKE 'web-%';" >/dev/null 2>&1 || true
   rm -f "$cookie_jar"
 }
 trap cleanup EXIT
