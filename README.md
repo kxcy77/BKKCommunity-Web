@@ -72,9 +72,11 @@ Set these Railway service variables:
 - the five `DB_*` variables supplied by Railway MySQL
 - `RUN_DATABASE_INITIALIZATION=false` after the first schema creation; safe numbered migrations still run on startup
 - `RESET_CODE_SECRET` generated with `php -r 'echo bin2hex(random_bytes(32)), PHP_EOL;'`
+- `RESEND_API_KEY` with sending-only access (preferred; uses HTTPS and takes priority over SMTP)
+- `MAIL_FROM` set to an address on a domain verified in Resend, and `MAIL_FROM_NAME=BKK Community`
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_ENCRYPTION=tls`, `MAIL_FROM`, and `MAIL_FROM_NAME=BKK Community`
 
-Use a transactional-email provider credential and a sender address verified by that provider. Do not use a normal email-account password. After deployment, `/health` must return 200 and `/ready` must return 200 before the mobile apps are tested.
+The SMTP variables are now fallback-only and may be omitted when Resend is configured. Use a sender address on a domain verified by the provider. Never commit the API key or a normal email-account password. After deployment, `/health` must return 200 and `/ready` must return 200 before the mobile apps are tested.
 
 The migration adds one unmistakably labelled demonstration event so event details and RSVP can be verified without pretending it is authentic BKK information. Replace it through the protected administrator page once the stakeholder supplies a real event; its location explicitly tells users not to travel.
 

@@ -39,6 +39,7 @@ return [
     'trust_proxy' => filter_var(env_value('APP_TRUST_PROXY', 'false'), FILTER_VALIDATE_BOOL),
     'reset_code_secret' => env_value('RESET_CODE_SECRET', ''),
     'mail' => [
+        'resend_api_key' => env_value('RESEND_API_KEY', ''),
         'host' => env_value('SMTP_HOST', ''),
         'port' => env_value('SMTP_PORT', '587'),
         'username' => env_value('SMTP_USER', ''),
