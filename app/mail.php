@@ -197,4 +197,7 @@ function send_password_reset_code_with_resend(string $recipient, string $code): 
         // Never log the recipient, reset code, API key, or provider response.
         throw new RuntimeException('The transactional email provider rejected the password-reset message.');
     }
+
+    // Operational evidence without exposing the recipient, code or provider ID.
+    error_log('BKK password reset email accepted by Resend.');
 }
